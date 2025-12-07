@@ -1,0 +1,7 @@
+{
+  "name": "TesterSuite v1",
+  "description": "Un programa base con distintas herramientas",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
