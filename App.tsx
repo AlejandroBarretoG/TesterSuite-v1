@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { initFirebase, getConfigDisplay, mockSignIn, testRealAuthConnection } from './services/firebase';
 import { testStorageConnection } from './services/storage';
@@ -8,7 +9,7 @@ import { FirebaseWizard } from './components/FirebaseWizard';
 import { BillingWizard } from './components/BillingWizard';
 import { RouterManager, AppMode } from './components/RouterManager';
 import { FirebaseProvider } from './context/FirebaseContext';
-import { Hammer, Smartphone, Layers, ChevronDown, Settings, X, Database, TestTube2, FileJson, Sparkles, Activity, HardDrive, Wand2, Map, Code2, KeyRound, ChevronUp, HelpCircle, CreditCard, UserCircle, Key, Cpu } from 'lucide-react';
+import { Hammer, Smartphone, Layers, ChevronDown, Settings, X, Database, TestTube2, FileJson, Sparkles, Activity, HardDrive, Wand2, Map, Code2, KeyRound, ChevronUp, HelpCircle, CreditCard, UserCircle, Key, Cpu, FolderOpen, Table, Settings2 } from 'lucide-react';
 
 interface TestStep {
   id: string;
@@ -292,9 +293,15 @@ const MainLayout: React.FC = () => {
       case 'voice_lab': return 'Laboratorio de Voz';
       case 'db_admin': return 'DB Admin';
       case 'prompt_manager': return 'Prompt Architect';
+      case 'storage': return 'Storage Lab';
+      case 'sheets': return 'Sheets Lab';
+      case 'json_admin': return 'JSON Admin (Beta)';
       default: return 'Diagnóstico Local';
     }
   };
+
+  const shouldHideConfig = (m: AppMode) => 
+    m === 'local' || m === 'auth_lab' || m === 'roadmap' || m === 'voice_lab' || m === 'db_admin' || m === 'prompt_manager' || m === 'storage' || m === 'sheets' || m === 'json_admin';
 
   return (
     <div className="min-h-screen bg-slate-100 font-sans relative overflow-hidden">
@@ -330,7 +337,7 @@ const MainLayout: React.FC = () => {
           </button>
 
           <div className="min-h-screen p-6 md:p-12">
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-6xl mx-auto">
               <FirebaseWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
               <BillingWizard isOpen={showBillingWizard} onClose={() => setShowBillingWizard(false)} />
 
@@ -343,20 +350,23 @@ const MainLayout: React.FC = () => {
                       { id: 'firebase', label: 'Firebase', icon: Database, color: 'orange' },
                       { id: 'auth_lab', label: 'Auth Lab', icon: TestTube2, color: 'teal' },
                       { id: 'db_admin', label: 'DB Admin', icon: FileJson, color: 'emerald' },
+                      { id: 'storage', label: 'Storage', icon: FolderOpen, color: 'blue' },
+                      { id: 'sheets', label: 'Sheets', icon: Table, color: 'green' },
+                      { id: 'json_admin', label: 'JSON Admin', icon: Settings2, color: 'indigo' },
                       { id: 'gemini', label: 'Gemini AI', icon: Sparkles, color: 'blue' },
                       { id: 'voice_lab', label: 'Voice Lab', icon: Activity, color: 'cyan' },
                       { id: 'local', label: 'Local', icon: HardDrive, color: 'purple' },
-                      { id: 'prompt_manager', label: 'Prompt Architect', icon: Wand2, color: 'indigo' },
+                      { id: 'prompt_manager', label: 'Prompt', icon: Wand2, color: 'indigo' },
                       { id: 'roadmap', label: 'Roadmap', icon: Map, color: 'indigo' }
                     ].map(tab => (
                       <button 
                         key={tab.id}
                         onClick={() => setMode(tab.id as AppMode)}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                           mode === tab.id ? `bg-${tab.color}-100 text-${tab.color}-700` : 'text-slate-500 hover:bg-slate-50'
                         }`}
                       >
-                        <tab.icon size={18} />
+                        <tab.icon size={16} />
                         {tab.label}
                       </button>
                     ))}
@@ -366,7 +376,7 @@ const MainLayout: React.FC = () => {
               </div>
 
               {/* Configuration Section (Collapsible) */}
-              {(mode !== 'local' && mode !== 'auth_lab' && mode !== 'roadmap' && mode !== 'voice_lab' && mode !== 'db_admin' && mode !== 'prompt_manager') && (
+              {!shouldHideConfig(mode) && (
                 <div className="mb-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="w-full flex items-center justify-between p-4 bg-slate-50 border-b border-slate-100">
                     <button onClick={() => setShowConfig(!showConfig)} className="flex items-center gap-2 text-slate-800 font-medium hover:text-slate-900 transition-colors">

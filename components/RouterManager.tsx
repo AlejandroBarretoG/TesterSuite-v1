@@ -1,14 +1,18 @@
+
 import React, { useState } from 'react';
 import { AuthLab } from './AuthLab';
 import { FutureRoadmap } from './FutureRoadmap';
 import { VoiceLab } from './VoiceLab';
 import { FirestoreAdmin } from './FirestoreAdmin';
 import { PromptManager } from './PromptManager';
+import { StorageLab } from './StorageLab';
+import { SheetsLab } from './SheetsLab';
+import { JsonAdmin } from './JsonAdmin';
 import { StatusCard } from './StatusCard';
 import { Server, ShieldCheck, XCircle, Database, Bot, HardDrive } from 'lucide-react';
 
 // Reuse types from original App logic or define here
-export type AppMode = 'firebase' | 'gemini' | 'local' | 'auth_lab' | 'roadmap' | 'voice_lab' | 'db_admin' | 'prompt_manager';
+export type AppMode = 'firebase' | 'gemini' | 'local' | 'auth_lab' | 'roadmap' | 'voice_lab' | 'db_admin' | 'prompt_manager' | 'storage' | 'sheets' | 'json_admin';
 
 interface RouterManagerProps {
   mode: AppMode;
@@ -50,8 +54,13 @@ export const RouterManager: React.FC<RouterManagerProps> = ({
     case 'voice_lab':
       return <VoiceLab />;
     case 'db_admin':
-      // FirestoreAdmin now internally uses useFirebase context
       return <FirestoreAdmin />;
+    case 'storage':
+      return <StorageLab />;
+    case 'sheets':
+      return <SheetsLab />;
+    case 'json_admin':
+      return <JsonAdmin />;
     default:
       // This handles 'firebase', 'gemini', and 'local' views which share the "Status Card" layout
       return (

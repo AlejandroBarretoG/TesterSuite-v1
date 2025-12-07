@@ -1,6 +1,6 @@
 
 // @ts-ignore
-import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getStorage, ref, uploadString, getDownloadURL, deleteObject, uploadBytesResumable, listAll, getMetadata } from 'firebase/storage';
 import { FirebaseInitResult } from './firebase';
 
 /**
@@ -79,5 +79,90 @@ export const testStorageConnection = async (appInstance: any): Promise<FirebaseI
       message: userMessage,
       error: technicalDetails
     };
+  }
+};
+
+/**
+ * PRODUCTION METHODS
+ */
+
+export interface FileData {
+  name: string;
+  fullPath: string;
+  url: string;
+  size?: number;
+  contentType?: string;
+  timeCreated?: string;
+}
+
+export const uploadFile = async (
+  appInstance: any, 
+  file: File, 
+  onProgress?: (progress: number) => void
+): Promise<{ success: boolean; url?: string; error?: string }> => {
+  try {
+    const storage = getStorage(appInstance);
+    // Use a fixed folder for this lab
+    const storageRef = ref(storage, `public_assets/${file.name}`);
+    
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    return new Promise((resolve) => {
+      uploadTask.on('state_changed',
+        (snapshot: any) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          if (onProgress) onProgress(progress);
+        },
+        (error: any) => {
+          resolve({ success: false, error: error.message });
+        },
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve({ success: true, url: downloadURL });
+        }
+      );
+    });
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const listFiles = async (appInstance: any, path: string = 'public_assets/'): Promise<{ success: boolean; files?: FileData[]; error?: string }> => {
+  try {
+    const storage = getStorage(appInstance);
+    const listRef = ref(storage, path);
+    const res = await listAll(listRef);
+
+    const files: FileData[] = await Promise.all(res.items.map(async (itemRef: any) => {
+      const url = await getDownloadURL(itemRef);
+      let metadata: any = {};
+      try {
+        metadata = await getMetadata(itemRef);
+      } catch (e) { console.warn("Could not get metadata for", itemRef.name); }
+
+      return {
+        name: itemRef.name,
+        fullPath: itemRef.fullPath,
+        url,
+        size: metadata.size,
+        contentType: metadata.contentType,
+        timeCreated: metadata.timeCreated
+      };
+    }));
+
+    return { success: true, files };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const deleteFile = async (appInstance: any, fullPath: string): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const storage = getStorage(appInstance);
+    const fileRef = ref(storage, fullPath);
+    await deleteObject(fileRef);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 };
