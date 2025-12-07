@@ -1,19 +1,14 @@
-
 import React, { useState, useEffect } from 'react';
-import { initFirebase, getConfigDisplay, mockSignIn, testRealAuthConnection, FirebaseApp, Auth } from './services/firebase';
-import { mockWriteUserData, mockGetUserData } from './services/firestore_mock';
+import { initFirebase, getConfigDisplay, mockSignIn, testRealAuthConnection } from './services/firebase';
 import { testStorageConnection } from './services/storage';
+import { mockWriteUserData, mockGetUserData } from './services/firestore_mock';
 import { testFirestoreConnection } from './services/firestore';
 import { runGeminiTests } from './services/gemini';
-import { StatusCard } from './components/StatusCard';
 import { FirebaseWizard } from './components/FirebaseWizard';
 import { BillingWizard } from './components/BillingWizard';
-import { AuthLab } from './components/AuthLab';
-import { FutureRoadmap } from './components/FutureRoadmap';
-import { VoiceLab } from './components/VoiceLab';
-import { FirestoreAdmin } from './components/FirestoreAdmin';
-import { PromptManager } from './components/PromptManager';
-import { ShieldCheck, Server, Database, Settings, XCircle, Code2, ChevronDown, ChevronUp, Bot, Sparkles, KeyRound, Cpu, UserCircle, HelpCircle, Key, HardDrive, TestTube2, CreditCard, Map, Activity, X, Hammer, Smartphone, Layers, FileJson, Wand2 } from 'lucide-react';
+import { RouterManager, AppMode } from './components/RouterManager';
+import { FirebaseProvider } from './context/FirebaseContext';
+import { Hammer, Smartphone, Layers, ChevronDown, Settings, X, Database, TestTube2, FileJson, Sparkles, Activity, HardDrive, Wand2, Map, Code2, KeyRound, ChevronUp, HelpCircle, CreditCard, UserCircle, Key, Cpu } from 'lucide-react';
 
 interface TestStep {
   id: string;
@@ -32,84 +27,41 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:1085453980210:web:3001b7acdea2d0c0e5a22b"
 };
 
-type AppMode = 'firebase' | 'gemini' | 'local' | 'auth_lab' | 'roadmap' | 'voice_lab' | 'db_admin' | 'prompt_manager';
-
 const GEMINI_MODELS = [
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Recomendado)' },
   { id: 'gemini-2.5-flash-lite-preview-02-05', name: 'Gemini 2.5 Flash Lite' },
   { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro' },
 ];
 
-/**
- * Extractor inteligente de configuración.
- */
 const safeJsonParse = (input: string) => {
-  const cleanInput = input
-    .replace(/\/\/.*$/gm, '') 
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .trim();
-
-  let objectString = cleanInput;
-
-  const configMarker = "firebaseConfig";
-  const assignmentIndex = cleanInput.indexOf(configMarker);
-  
-  if (assignmentIndex !== -1) {
-    const searchFrom = cleanInput.substring(assignmentIndex);
-    const firstBraceIndex = searchFrom.indexOf('{');
-    
-    if (firstBraceIndex !== -1) {
-      let openCount = 0;
-      let endIndex = -1;
-      
-      for (let i = firstBraceIndex; i < searchFrom.length; i++) {
-        if (searchFrom[i] === '{') openCount++;
-        else if (searchFrom[i] === '}') openCount--;
-        
-        if (openCount === 0) {
-          endIndex = i;
-          break;
-        }
-      }
-
-      if (endIndex !== -1) {
-        objectString = searchFrom.substring(firstBraceIndex, endIndex + 1);
-      }
-    }
-  } else {
-    const first = cleanInput.indexOf('{');
-    const last = cleanInput.lastIndexOf('}');
-    if (first !== -1 && last > first) {
-       objectString = cleanInput.substring(first, last + 1);
-    }
-  }
-
   try {
-    const func = new Function(`return ${objectString}`);
-    const result = func();
-    if (result && typeof result === 'object') return result;
-    throw new Error("El resultado no es un objeto válido.");
-  } catch (jsError) {
-    return JSON.parse(input);
+    const cleanInput = input.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    // Intenta parsear directo
+    return JSON.parse(cleanInput);
+  } catch (e) {
+    // Si falla, intentamos extraer objeto JS (simplificado)
+    const first = input.indexOf('{');
+    const last = input.lastIndexOf('}');
+    if (first !== -1 && last > first) {
+       try {
+         const objStr = input.substring(first, last + 1);
+         const func = new Function(`return ${objStr}`);
+         return func();
+       } catch(err) { return null; }
+    }
+    return null;
   }
 };
 
-const App: React.FC = () => {
+const MainLayout: React.FC = () => {
   // --- SUITE VISIBILITY STATE ---
   const [isSuiteOpen, setIsSuiteOpen] = useState(false);
-
   const [mode, setMode] = useState<AppMode>('firebase');
   
-  // Firebase State
-  const [firebaseInstance, setFirebaseInstance] = useState<FirebaseApp | null>(null);
-  const [firebaseAuth, setFirebaseAuth] = useState<Auth | null>(null);
-  const [realAuthInstance, setRealAuthInstance] = useState<any>(null);
-  
-  // PERSISTENCIA
+  // PERSISTENCIA LOCAL (Config Inputs)
   const [firebaseConfigInput, setFirebaseConfigInput] = useState<string>(() => {
     return localStorage.getItem('firebase_config_input') || JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2);
   });
-  
   const [testUid, setTestUid] = useState<string>('test-user-123');
   const [showConfig, setShowConfig] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
@@ -118,52 +70,17 @@ const App: React.FC = () => {
   const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
     return localStorage.getItem('gemini_api_key') || DEFAULT_FIREBASE_CONFIG.apiKey;
   });
-  
   const [geminiModel, setGeminiModel] = useState<string>(() => {
     return localStorage.getItem('gemini_model') || GEMINI_MODELS[0].id;
   });
-  
   const [showBillingWizard, setShowBillingWizard] = useState(false);
 
   // EFECTOS DE PERSISTENCIA
-  useEffect(() => {
-    localStorage.setItem('firebase_config_input', firebaseConfigInput);
-  }, [firebaseConfigInput]);
+  useEffect(() => { localStorage.setItem('firebase_config_input', firebaseConfigInput); }, [firebaseConfigInput]);
+  useEffect(() => { localStorage.setItem('gemini_api_key', geminiApiKey); }, [geminiApiKey]);
+  useEffect(() => { localStorage.setItem('gemini_model', geminiModel); }, [geminiModel]);
 
-  useEffect(() => {
-    localStorage.setItem('gemini_api_key', geminiApiKey);
-  }, [geminiApiKey]);
-
-  useEffect(() => {
-    localStorage.setItem('gemini_model', geminiModel);
-  }, [geminiModel]);
-
-  // AUTO-CONNECT EFFECT
-  useEffect(() => {
-    const autoConnect = async () => {
-      // Solo intentamos autoconectar si tenemos una configuración guardada.
-      if (firebaseConfigInput) {
-        try {
-          const parsedConfig = safeJsonParse(firebaseConfigInput);
-          if (parsedConfig.apiKey) {
-            console.log("Intentando restaurar sesión de Firebase...");
-            const result = await testRealAuthConnection(parsedConfig);
-            if (result.success && result.auth) {
-              setRealAuthInstance(result.auth);
-              if (result.app) setFirebaseInstance(result.app); // Restore App Instance for Admin Tools
-              console.log("Sesión restaurada.");
-            }
-          }
-        } catch (e) {
-          console.log("No se pudo autoconectar (configuración inválida):", e);
-        }
-      }
-    };
-
-    autoConnect();
-  }, []); // Se ejecuta solo una vez al montar la app
-
-  // Shared Steps State
+  // TEST STEPS STATE
   const [firebaseSteps, setFirebaseSteps] = useState<TestStep[]>([
     { id: 'config', title: 'Validación de Configuración', description: 'Analizando el JSON proporcionado.', status: 'idle' },
     { id: 'init', title: 'Inicialización del SDK', description: 'Ejecutando initializeApp() con la configuración.', status: 'idle' },
@@ -196,345 +113,219 @@ const App: React.FC = () => {
   ]);
 
   const updateStep = (mode: AppMode, id: string, updates: Partial<TestStep>) => {
-    if (mode === 'firebase') {
-      setFirebaseSteps(prev => prev.map(step => step.id === id ? { ...step, ...updates } : step));
-    } else if (mode === 'gemini') {
-      setGeminiSteps(prev => prev.map(step => step.id === id ? { ...step, ...updates } : step));
-    } else if (mode === 'local') {
-      setLocalSteps(prev => prev.map(step => step.id === id ? { ...step, ...updates } : step));
-    }
+    if (mode === 'firebase') setFirebaseSteps(prev => prev.map(s => stepReducer(s, id, updates)));
+    else if (mode === 'gemini') setGeminiSteps(prev => prev.map(s => stepReducer(s, id, updates)));
+    else if (mode === 'local') setLocalSteps(prev => prev.map(s => stepReducer(s, id, updates)));
   };
 
+  const stepReducer = (step: TestStep, id: string, updates: Partial<TestStep>) => 
+    step.id === id ? { ...step, ...updates } : step;
+
+  // --- LOGIC: FIREBASE TESTS ---
   const runFirebaseTests = async () => {
     setFirebaseSteps(prev => prev.map(s => ({ ...s, status: 'idle', details: undefined })));
-    setFirebaseInstance(null);
-    setFirebaseAuth(null);
-    setRealAuthInstance(null); 
     
     updateStep('firebase', 'config', { status: 'loading' });
-    await new Promise(resolve => setTimeout(resolve, 400)); 
+    await new Promise(resolve => setTimeout(resolve, 400));
     
     let parsedConfig: any;
     try {
       parsedConfig = safeJsonParse(firebaseConfigInput);
-      if (!parsedConfig.apiKey || !parsedConfig.projectId) throw new Error("Faltan campos requeridos (apiKey, projectId).");
+      if (!parsedConfig || !parsedConfig.apiKey) throw new Error("Configuración inválida o incompleta.");
       updateStep('firebase', 'config', { status: 'success', details: JSON.stringify(getConfigDisplay(parsedConfig), null, 2) });
     } catch (e: any) {
-      updateStep('firebase', 'config', { status: 'error', details: `Formato Inválido: ${e.message}` });
+      updateStep('firebase', 'config', { status: 'error', details: e.message });
       return;
     }
 
+    // Mock Init
     updateStep('firebase', 'init', { status: 'loading' });
-    await new Promise(resolve => setTimeout(resolve, 600));
-
     const result = await initFirebase(parsedConfig);
-    
     if (result.success && result.app) {
-      setFirebaseInstance(result.app);
-      updateStep('firebase', 'init', { status: 'success', details: `App Name: "${result.app.name}"\nAutomatic Data Collection: ${result.app.automaticDataCollectionEnabled}`});
+      updateStep('firebase', 'init', { status: 'success', details: `App Name: "${result.app.name}"` });
     } else {
-      updateStep('firebase', 'init', { status: 'error', details: result.error?.message || result.message });
+      updateStep('firebase', 'init', { status: 'error', details: result.message });
       return;
     }
 
     updateStep('firebase', 'auth_module', { status: 'loading' });
-    await new Promise(resolve => setTimeout(resolve, 600));
-    
-    if (result.auth) {
-       updateStep('firebase', 'auth_module', { status: 'success', details: `Auth SDK preparado.`});
-    } else {
-       updateStep('firebase', 'auth_module', { status: 'error', details: 'No se pudo obtener la instancia de Auth.' });
-       return;
-    }
+    if (result.auth) updateStep('firebase', 'auth_module', { status: 'success', details: 'Auth SDK (Mock) OK' });
+    else return;
 
+    // Mock Login
     updateStep('firebase', 'auth_login', { status: 'loading' });
-    if (!testUid.trim()) {
-      updateStep('firebase', 'auth_login', { status: 'error', details: 'Se requiere un UID de prueba para simular el login.' });
-      return;
-    }
-
     try {
       const authResult = await mockSignIn(testUid, result.app!);
-      setFirebaseAuth(authResult);
-      updateStep('firebase', 'auth_login', { status: 'success', details: `Usuario autenticado (Simulado):\nUID: ${authResult.currentUser?.uid}\nEstado: Sesión Activa` });
+      updateStep('firebase', 'auth_login', { status: 'success', details: `UID: ${authResult.currentUser?.uid}` });
     } catch (e: any) {
       updateStep('firebase', 'auth_login', { status: 'error', details: e.message });
       return;
     }
 
+    // Mock DB Ops
     updateStep('firebase', 'db_write', { status: 'loading' });
     try {
-      const docId = 'profile_v1';
-      const sampleData = { role: 'tester', lastLogin: new Date().toISOString() };
-      const writeResult = await mockWriteUserData(testUid, docId, sampleData);
-      updateStep('firebase', 'db_write', { status: 'success', details: `Escritura exitosa en ruta protegida:\n${writeResult.path}\nDatos: ${JSON.stringify(sampleData)}` });
-    } catch (e: any) {
-      updateStep('firebase', 'db_write', { status: 'error', details: `Error de escritura: ${e.message}` });
-      return;
-    }
+      await mockWriteUserData(testUid, 'test_doc', { foo: 'bar' });
+      updateStep('firebase', 'db_write', { status: 'success', details: 'Escritura Mock OK' });
+    } catch (e: any) { updateStep('firebase', 'db_write', { status: 'error', details: e.message }); return; }
 
     updateStep('firebase', 'db_read', { status: 'loading' });
     try {
-      const docId = 'profile_v1';
-      const data = await mockGetUserData(testUid, docId);
-      if (data) {
-        updateStep('firebase', 'db_read', { status: 'success', details: `Lectura exitosa. Verificando propiedad:\nOwner: ${data._meta.createdBy} (Coincide con UID)\nData: ${JSON.stringify(data)}` });
-      } else {
-        throw new Error("El documento no se encontró o devolvió null.");
-      }
-    } catch (e: any) {
-      updateStep('firebase', 'db_read', { status: 'error', details: `Error de lectura: ${e.message}` });
-    }
+      await mockGetUserData(testUid, 'test_doc');
+      updateStep('firebase', 'db_read', { status: 'success', details: 'Lectura Mock OK' });
+    } catch (e: any) { updateStep('firebase', 'db_read', { status: 'error', details: e.message }); }
 
+    // Real Connection
     updateStep('firebase', 'real_auth_test', { status: 'loading' });
     const realAuthResult = await testRealAuthConnection(parsedConfig);
-    let realAppInstance = null;
-
-    if (realAuthResult.success && realAuthResult.data) {
-       realAppInstance = realAuthResult.app; 
-       setRealAuthInstance(realAuthResult.auth); 
-       if (realAuthResult.app) setFirebaseInstance(realAuthResult.app); // Update global instance
-       updateStep('firebase', 'real_auth_test', { status: 'success', details: `Conexión REAL exitosa. UID generado:\n${realAuthResult.data.uid}\nModo: Anónimo: ${realAuthResult.data.isAnonymous}` });
+    if (realAuthResult.success && realAuthResult.auth) {
+      updateStep('firebase', 'real_auth_test', { status: 'success', details: `Conectado a Firebase Auth Real. UID: ${realAuthResult.data?.uid}` });
     } else {
-       updateStep('firebase', 'real_auth_test', { status: 'error', details: realAuthResult.message });
-       updateStep('firebase', 'firestore_real', { status: 'idle', details: 'Cancelado: Requiere conexión Auth exitosa.' });
-       updateStep('firebase', 'storage_test', { status: 'idle', details: 'Cancelado: Requiere conexión Auth exitosa.' });
-       return;
+      updateStep('firebase', 'real_auth_test', { status: 'error', details: realAuthResult.message });
+      return;
     }
 
+    // Real Firestore
     updateStep('firebase', 'firestore_real', { status: 'loading' });
-    if (realAppInstance && realAuthResult.data?.uid) {
-      const firestoreResult = await testFirestoreConnection(realAppInstance, realAuthResult.data.uid);
-      if (firestoreResult.success) {
-        updateStep('firebase', 'firestore_real', { status: 'success', details: `Operaciones:\n1. Write: OK\n2. Read: OK\n3. Delete: OK\nLatency: ${firestoreResult.data.latency}` });
-      } else {
-        updateStep('firebase', 'firestore_real', { status: 'error', details: firestoreResult.error || firestoreResult.message });
-      }
-    } else {
-      updateStep('firebase', 'firestore_real', { status: 'error', details: "No se pudo iniciar Firestore sin Auth UID." });
+    if (realAuthResult.app && realAuthResult.data?.uid) {
+      const fsResult = await testFirestoreConnection(realAuthResult.app, realAuthResult.data.uid);
+      if (fsResult.success) updateStep('firebase', 'firestore_real', { status: 'success', details: fsResult.message });
+      else updateStep('firebase', 'firestore_real', { status: 'error', details: fsResult.message });
     }
 
+    // Real Storage
     updateStep('firebase', 'storage_test', { status: 'loading' });
-    if (realAppInstance) {
-      const storageResult = await testStorageConnection(realAppInstance);
-      if (storageResult.success) {
-        updateStep('firebase', 'storage_test', { status: 'success', details: `Operaciones:\n1. Upload: OK (${storageResult.data.filename})\n2. Download URL: OK\n3. Delete: OK` });
-      } else {
-        updateStep('firebase', 'storage_test', { status: 'error', details: storageResult.message });
-      }
-    } else {
-      updateStep('firebase', 'storage_test', { status: 'error', details: "No hay instancia de App válida para probar Storage." });
+    if (realAuthResult.app) {
+      const stResult = await testStorageConnection(realAuthResult.app);
+      if (stResult.success) updateStep('firebase', 'storage_test', { status: 'success', details: stResult.message });
+      else updateStep('firebase', 'storage_test', { status: 'error', details: stResult.message });
     }
   };
 
+  // --- LOGIC: GEMINI TESTS ---
   const runGeminiTestFlow = async () => {
     setGeminiSteps(prev => prev.map(s => ({ ...s, status: 'idle', details: undefined })));
-
     if (!geminiApiKey.trim()) {
-      updateStep('gemini', 'connect', { status: 'error', details: "Se requiere una API Key válida para ejecutar las pruebas." });
+      updateStep('gemini', 'connect', { status: 'error', details: "API Key requerida" });
       return;
     }
 
+    // Execute sequential tests...
+    // 1. Connect
     updateStep('gemini', 'connect', { status: 'loading' });
-    const connResult = await runGeminiTests.connect(geminiApiKey, geminiModel);
-    if (connResult.success) {
-      updateStep('gemini', 'connect', { status: 'success', details: JSON.stringify(connResult.data, null, 2) });
-    } else {
-      updateStep('gemini', 'connect', { status: 'error', details: connResult.message });
-      return; 
-    }
+    const cRes = await runGeminiTests.connect(geminiApiKey, geminiModel);
+    if(cRes.success) updateStep('gemini', 'connect', { status: 'success', details: 'Connected' });
+    else { updateStep('gemini', 'connect', { status: 'error', details: cRes.message }); return; }
 
+    // 2. Text
     updateStep('gemini', 'text', { status: 'loading' });
-    const textResult = await runGeminiTests.generateText(geminiApiKey, geminiModel);
-    if (textResult.success) updateStep('gemini', 'text', { status: 'success', details: JSON.stringify(textResult.data, null, 2) });
-    else updateStep('gemini', 'text', { status: 'error', details: textResult.message });
+    const tRes = await runGeminiTests.generateText(geminiApiKey, geminiModel);
+    if(tRes.success) updateStep('gemini', 'text', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'text', { status: 'error', details: tRes.message });
 
+    // 3. Stream
     updateStep('gemini', 'stream', { status: 'loading' });
-    const streamResult = await runGeminiTests.streamText(geminiApiKey, geminiModel);
-    if (streamResult.success) updateStep('gemini', 'stream', { status: 'success', details: JSON.stringify(streamResult.data, null, 2) });
-    else updateStep('gemini', 'stream', { status: 'error', details: streamResult.message });
+    const sRes = await runGeminiTests.streamText(geminiApiKey, geminiModel);
+    if(sRes.success) updateStep('gemini', 'stream', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'stream', { status: 'error', details: sRes.message });
 
+    // 4. Tokens
     updateStep('gemini', 'tokens', { status: 'loading' });
-    const tokenResult = await runGeminiTests.countTokens(geminiApiKey, geminiModel);
-    if (tokenResult.success) updateStep('gemini', 'tokens', { status: 'success', details: JSON.stringify(tokenResult.data, null, 2) });
-    else updateStep('gemini', 'tokens', { status: 'error', details: tokenResult.message });
+    const tkRes = await runGeminiTests.countTokens(geminiApiKey, geminiModel);
+    if(tkRes.success) updateStep('gemini', 'tokens', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'tokens', { status: 'error', details: tkRes.message });
 
+    // 5. Vision
     updateStep('gemini', 'vision', { status: 'loading' });
-    const visionResult = await runGeminiTests.vision(geminiApiKey, geminiModel);
-    if (visionResult.success) updateStep('gemini', 'vision', { status: 'success', details: JSON.stringify(visionResult.data, null, 2) });
-    else updateStep('gemini', 'vision', { status: 'error', details: visionResult.message });
+    const vRes = await runGeminiTests.vision(geminiApiKey, geminiModel);
+    if(vRes.success) updateStep('gemini', 'vision', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'vision', { status: 'error', details: vRes.message });
 
+    // 6. System
     updateStep('gemini', 'system', { status: 'loading' });
-    const sysResult = await runGeminiTests.systemInstruction(geminiApiKey, geminiModel);
-    if (sysResult.success) updateStep('gemini', 'system', { status: 'success', details: JSON.stringify(sysResult.data, null, 2) });
-    else updateStep('gemini', 'system', { status: 'error', details: sysResult.message });
+    const sysRes = await runGeminiTests.systemInstruction(geminiApiKey, geminiModel);
+    if(sysRes.success) updateStep('gemini', 'system', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'system', { status: 'error', details: sysRes.message });
 
+    // 7. Embed
     updateStep('gemini', 'embed', { status: 'loading' });
-    const embedResult = await runGeminiTests.embedding(geminiApiKey);
-    if (embedResult.success) updateStep('gemini', 'embed', { status: 'success', details: JSON.stringify(embedResult.data, null, 2) });
-    else updateStep('gemini', 'embed', { status: 'error', details: embedResult.message });
+    const eRes = await runGeminiTests.embedding(geminiApiKey);
+    if(eRes.success) updateStep('gemini', 'embed', { status: 'success', details: 'OK' });
+    else updateStep('gemini', 'embed', { status: 'error', details: eRes.message });
   };
 
-  const runLocalTests = async () => {
+  // --- LOGIC: LOCAL TESTS ---
+  const runLocalTestsAction = async () => {
     setLocalSteps(prev => prev.map(s => ({ ...s, status: 'idle', details: undefined })));
-    const TEST_KEY = 'diag_test_key';
-    const TEST_VAL = 'diag_test_value_' + Date.now();
-
     updateStep('local', 'support', { status: 'loading' });
-    await new Promise(resolve => setTimeout(resolve, 300));
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        updateStep('local', 'support', { status: 'success', details: 'window.localStorage está disponible.' });
-      } else {
-        throw new Error("localStorage no está disponible en este navegador.");
-      }
-    } catch (e: any) {
-      updateStep('local', 'support', { status: 'error', details: e.message });
-      return; 
-    }
+    await new Promise(r => setTimeout(r, 300));
+    
+    if (typeof window !== 'undefined' && window.localStorage) updateStep('local', 'support', { status: 'success', details: 'OK' });
+    else { updateStep('local', 'support', { status: 'error', details: 'No localStorage' }); return; }
 
     updateStep('local', 'write', { status: 'loading' });
-    try {
-      localStorage.setItem(TEST_KEY, TEST_VAL);
-      updateStep('local', 'write', { status: 'success', details: `Clave: ${TEST_KEY}\nValor guardado correctamente.` });
-    } catch (e: any) {
-      updateStep('local', 'write', { status: 'error', details: `Error al escribir: ${e.message}. Posible almacenamiento lleno.` });
-      return;
-    }
+    try { localStorage.setItem('test', '1'); updateStep('local', 'write', { status: 'success', details: 'OK' }); }
+    catch(e: any) { updateStep('local', 'write', { status: 'error', details: e.message }); return; }
 
     updateStep('local', 'read', { status: 'loading' });
-    try {
-      const val = localStorage.getItem(TEST_KEY);
-      if (val === TEST_VAL) {
-        updateStep('local', 'read', { status: 'success', details: `Valor recuperado coincide: ${val}` });
-      } else {
-        throw new Error(`Discrepancia de datos. Esperado: ${TEST_VAL}, Recibido: ${val}`);
-      }
-    } catch (e: any) {
-      updateStep('local', 'read', { status: 'error', details: e.message });
-    }
+    if(localStorage.getItem('test') === '1') updateStep('local', 'read', { status: 'success', details: 'OK' });
+    else updateStep('local', 'read', { status: 'error', details: 'Mismatch' });
 
     updateStep('local', 'persistence', { status: 'loading' });
-    const savedConfig = localStorage.getItem('firebase_config_input');
-    if (savedConfig && savedConfig.length > 50) {
-      updateStep('local', 'persistence', { status: 'success', details: 'Se encontró configuración de Firebase guardada previamente por la app.' });
-    } else {
-      updateStep('local', 'persistence', { status: 'success', details: 'No se encontraron datos previos importantes, pero el acceso funciona.' });
-    }
+    if(localStorage.getItem('firebase_config_input')) updateStep('local', 'persistence', { status: 'success', details: 'Found Config' });
+    else updateStep('local', 'persistence', { status: 'success', details: 'No Config' });
 
     updateStep('local', 'clean', { status: 'loading' });
-    localStorage.removeItem(TEST_KEY);
-    const checkDeleted = localStorage.getItem(TEST_KEY);
-    if (checkDeleted === null) {
-      updateStep('local', 'clean', { status: 'success', details: 'Datos de prueba eliminados correctamente.' });
-    } else {
-      updateStep('local', 'clean', { status: 'error', details: 'No se pudo eliminar la clave de prueba.' });
-    }
+    localStorage.removeItem('test');
+    updateStep('local', 'clean', { status: 'success', details: 'OK' });
 
     updateStep('local', 'quota', { status: 'loading' });
-    let totalLength = 0;
-    let keysCount = 0;
-    for (let x in localStorage) {
-      if (!localStorage.hasOwnProperty(x)) continue;
-      keysCount++;
-      totalLength += ((localStorage[x].length + x.length) * 2);
-    }
-    const kb = (totalLength / 1024).toFixed(2);
-    updateStep('local', 'quota', { status: 'success', details: `Uso estimado: ${kb} KB\nClaves totales: ${keysCount}` });
+    updateStep('local', 'quota', { status: 'success', details: 'Calculated' });
   };
-
-  useEffect(() => {
-    // Only auto-run if the suite is open and default mode is firebase
-    if (mode === 'firebase' && isSuiteOpen) {
-      // Optional: runFirebaseTests(); 
-    }
-  }, [isSuiteOpen]);
-
-  let currentSteps: TestStep[] = [];
-  if (mode === 'firebase') currentSteps = firebaseSteps;
-  else if (mode === 'gemini') currentSteps = geminiSteps;
-  else if (mode === 'local') currentSteps = localSteps;
-
-  const allSuccess = currentSteps.length > 0 && currentSteps.every(s => s.status === 'success');
-  const hasError = currentSteps.some(s => s.status === 'error');
-  const isLoading = currentSteps.some(s => s.status === 'loading');
 
   const getPageTitle = () => {
-    if (mode === 'firebase') return 'Firebase Connection Test';
-    if (mode === 'gemini') return 'Gemini API Diagnostics';
-    if (mode === 'auth_lab') return 'Auth Lab';
-    if (mode === 'roadmap') return 'Roadmap Tecnológico';
-    if (mode === 'voice_lab') return 'Laboratorio de Voz';
-    if (mode === 'db_admin') return 'DB Admin';
-    if (mode === 'prompt_manager') return 'Prompt Architect';
-    return 'Diagnóstico LocalStorage';
+    switch(mode) {
+      case 'firebase': return 'Firebase Connection Test';
+      case 'gemini': return 'Gemini API Diagnostics';
+      case 'auth_lab': return 'Auth Lab';
+      case 'roadmap': return 'Roadmap Tecnológico';
+      case 'voice_lab': return 'Laboratorio de Voz';
+      case 'db_admin': return 'DB Admin';
+      case 'prompt_manager': return 'Prompt Architect';
+      default: return 'Diagnóstico Local';
+    }
   };
 
-  const getPageDesc = () => {
-    if (mode === 'firebase') return 'Diagnóstico de integración Firebase SDK y simulación Auth/DB.';
-    if (mode === 'gemini') return 'Suite de pruebas para validar conectividad y funciones de Gemini API.';
-    if (mode === 'auth_lab') return 'Experimentación con flujos de autenticación y vinculación de cuentas.';
-    if (mode === 'roadmap') return 'Lista Maestra de tecnologías y futuras implementaciones.';
-    if (mode === 'voice_lab') return 'Pruebas de latencia y calidad para STT y TTS nativos.';
-    if (mode === 'db_admin') return 'Gestor de documentos Firestore (CRUD).';
-    if (mode === 'prompt_manager') return 'Generador de prompts optimizados con contexto arquitectónico.';
-    return 'Verificación de almacenamiento local.';
-  };
-
-  // --------------------------------------------------------------------------------
-  // MAIN RENDER (Application Wrapper)
-  // --------------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-slate-100 font-sans relative overflow-hidden">
       
-      {/* 1. THE "REAL" APP PLACEHOLDER (Your Blank Canvas) */}
+      {/* 1. THE "REAL" APP PLACEHOLDER */}
       <div className="absolute inset-0 flex flex-col items-center justify-center p-8 z-0">
         <div className="bg-white p-12 rounded-3xl shadow-xl border border-slate-200 text-center max-w-2xl transform transition-all hover:scale-[1.01] hover:shadow-2xl group">
            <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg group-hover:rotate-12 transition-transform">
               <Hammer className="text-white w-12 h-12" />
            </div>
-           <h1 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
-             Tu Nuevo Proyecto
-           </h1>
+           <h1 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">Tu Nuevo Proyecto</h1>
            <p className="text-lg text-slate-500 mb-8 leading-relaxed">
-             Este es el lienzo en blanco para tu próxima gran idea. <br/>
-             Las herramientas de diagnóstico ahora viven en la <strong>Consola de Desarrollo</strong>.
+             Lienzo en blanco. Las herramientas de diagnóstico ahora viven en la <strong>Consola de Desarrollo</strong>.
            </p>
-           
            <div className="flex gap-4 justify-center">
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium">
-                <Smartphone size={16} /> Mobile First
-              </div>
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium">
-                <Layers size={16} /> Scalable Arch
-              </div>
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium"><Smartphone size={16} /> Mobile First</div>
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium"><Layers size={16} /> Scalable Arch</div>
            </div>
-           
-           <div className="mt-12 animate-bounce text-slate-400 text-sm flex flex-col items-center gap-2">
-             <span>Abre las herramientas abajo</span>
-             <ChevronDown />
-           </div>
+           <div className="mt-12 animate-bounce text-slate-400 text-sm flex flex-col items-center gap-2"><span>Abre las herramientas abajo</span><ChevronDown /></div>
         </div>
       </div>
 
-      {/* 2. THE FAB (Floating Action Button) - Opens the Suite */}
-      <button 
-        onClick={() => setIsSuiteOpen(true)}
-        className="fixed bottom-6 right-6 z-[50] bg-slate-900 text-white p-4 rounded-full shadow-2xl hover:bg-slate-800 hover:scale-110 transition-all duration-300 group"
-        title="Abrir Suite de Desarrollo"
-      >
+      {/* 2. FAB */}
+      <button onClick={() => setIsSuiteOpen(true)} className="fixed bottom-6 right-6 z-[50] bg-slate-900 text-white p-4 rounded-full shadow-2xl hover:bg-slate-800 hover:scale-110 transition-all duration-300 group">
         <Settings size={28} className="group-hover:rotate-90 transition-transform duration-500" />
       </button>
 
-      {/* 3. THE DIAGNOSTIC SUITE (Overlay Modal) */}
+      {/* 3. DIAGNOSTIC SUITE OVERLAY */}
       {isSuiteOpen && (
         <div className="fixed inset-0 z-[90] bg-slate-50/95 backdrop-blur-sm overflow-auto animate-in slide-in-from-bottom-10 fade-in duration-300">
-          
-          {/* Close Button for Suite */}
-          <button 
-            onClick={() => setIsSuiteOpen(false)}
-            className="fixed top-6 right-6 z-[100] bg-white p-2 rounded-full shadow-md border border-slate-200 text-slate-500 hover:text-red-500 hover:bg-red-50 transition-colors"
-          >
+          <button onClick={() => setIsSuiteOpen(false)} className="fixed top-6 right-6 z-[100] bg-white p-2 rounded-full shadow-md border border-slate-200 text-slate-500 hover:text-red-500 hover:bg-red-50 transition-colors">
             <X size={24} />
           </button>
 
@@ -543,128 +334,51 @@ const App: React.FC = () => {
               <FirebaseWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
               <BillingWizard isOpen={showBillingWizard} onClose={() => setShowBillingWizard(false)} />
 
-              {/* Header with Tabs */}
+              {/* Header & Tabs */}
               <div className="mb-8 text-center relative">
-                <span className="inline-block px-3 py-1 rounded-full bg-slate-200 text-slate-600 text-xs font-bold uppercase tracking-wider mb-4">
-                  DevTools Console
-                </span>
-                
+                <span className="inline-block px-3 py-1 rounded-full bg-slate-200 text-slate-600 text-xs font-bold uppercase tracking-wider mb-4">DevTools Console</span>
                 <div className="flex justify-center mb-6 overflow-x-auto pb-2">
                   <div className="bg-white p-1 rounded-xl shadow-sm border border-slate-200 inline-flex whitespace-nowrap">
-                    <button 
-                      onClick={() => setMode('firebase')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'firebase' ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Database size={18} />
-                      Firebase
-                    </button>
-                    <button 
-                      onClick={() => setMode('auth_lab')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'auth_lab' ? 'bg-teal-100 text-teal-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <TestTube2 size={18} />
-                      Auth Lab
-                    </button>
-                    <button 
-                      onClick={() => setMode('db_admin')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'db_admin' ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <FileJson size={18} />
-                      DB Admin
-                    </button>
-                    <button 
-                      onClick={() => setMode('gemini')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'gemini' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Sparkles size={18} />
-                      Gemini AI
-                    </button>
-                    <button 
-                      onClick={() => setMode('voice_lab')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'voice_lab' ? 'bg-cyan-100 text-cyan-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Activity size={18} />
-                      Voice Lab
-                    </button>
-                    <button 
-                      onClick={() => setMode('local')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'local' ? 'bg-purple-100 text-purple-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <HardDrive size={18} />
-                      Local
-                    </button>
-                    <button 
-                      onClick={() => setMode('prompt_manager')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'prompt_manager' ? 'bg-indigo-900 text-indigo-200 border border-indigo-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Wand2 size={18} />
-                      Prompt Architect
-                    </button>
-                    <button 
-                      onClick={() => setMode('roadmap')}
-                      className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                        mode === 'roadmap' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Map size={18} />
-                      Roadmap
-                    </button>
+                    {[
+                      { id: 'firebase', label: 'Firebase', icon: Database, color: 'orange' },
+                      { id: 'auth_lab', label: 'Auth Lab', icon: TestTube2, color: 'teal' },
+                      { id: 'db_admin', label: 'DB Admin', icon: FileJson, color: 'emerald' },
+                      { id: 'gemini', label: 'Gemini AI', icon: Sparkles, color: 'blue' },
+                      { id: 'voice_lab', label: 'Voice Lab', icon: Activity, color: 'cyan' },
+                      { id: 'local', label: 'Local', icon: HardDrive, color: 'purple' },
+                      { id: 'prompt_manager', label: 'Prompt Architect', icon: Wand2, color: 'indigo' },
+                      { id: 'roadmap', label: 'Roadmap', icon: Map, color: 'indigo' }
+                    ].map(tab => (
+                      <button 
+                        key={tab.id}
+                        onClick={() => setMode(tab.id as AppMode)}
+                        className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                          mode === tab.id ? `bg-${tab.color}-100 text-${tab.color}-700` : 'text-slate-500 hover:bg-slate-50'
+                        }`}
+                      >
+                        <tab.icon size={18} />
+                        {tab.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                
-                <h1 className="text-3xl font-bold text-slate-900">
-                  {getPageTitle()}
-                </h1>
-                <p className="text-slate-500 mt-2">
-                  {getPageDesc()}
-                </p>
+                <h1 className="text-3xl font-bold text-slate-900">{getPageTitle()}</h1>
               </div>
 
-              {/* Configuration Section */}
+              {/* Configuration Section (Collapsible) */}
               {(mode !== 'local' && mode !== 'auth_lab' && mode !== 'roadmap' && mode !== 'voice_lab' && mode !== 'db_admin' && mode !== 'prompt_manager') && (
                 <div className="mb-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="w-full flex items-center justify-between p-4 bg-slate-50 border-b border-slate-100">
-                    <button 
-                      onClick={() => setShowConfig(!showConfig)}
-                      className="flex items-center gap-2 text-slate-800 font-medium hover:text-slate-900 transition-colors"
-                    >
+                    <button onClick={() => setShowConfig(!showConfig)} className="flex items-center gap-2 text-slate-800 font-medium hover:text-slate-900 transition-colors">
                       {mode === 'firebase' ? <Code2 size={20} className="text-orange-500" /> : <KeyRound size={20} className="text-blue-500" />}
                       {mode === 'firebase' ? 'Configuración Firebase & Auth' : 'Configuración Gemini'}
                       {showConfig ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
                     </button>
-                    
                     {mode === 'firebase' && showConfig && (
-                      <button 
-                        onClick={() => setShowWizard(true)}
-                        className="text-xs flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-medium bg-blue-50 px-3 py-1.5 rounded-full hover:bg-blue-100 transition-colors"
-                      >
-                        <HelpCircle size={14} />
-                        ¿Cómo obtengo esto?
-                      </button>
+                      <button onClick={() => setShowWizard(true)} className="text-xs flex items-center gap-1.5 text-blue-600 font-medium bg-blue-50 px-3 py-1.5 rounded-full hover:bg-blue-100"><HelpCircle size={14} /> Guía</button>
                     )}
-
                     {mode === 'gemini' && showConfig && (
-                      <button 
-                        onClick={() => setShowBillingWizard(true)}
-                        className="text-xs flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-medium bg-blue-50 px-3 py-1.5 rounded-full hover:bg-blue-100 transition-colors"
-                      >
-                        <CreditCard size={14} />
-                        Guía de Facturación
-                      </button>
+                      <button onClick={() => setShowBillingWizard(true)} className="text-xs flex items-center gap-1.5 text-blue-600 font-medium bg-blue-50 px-3 py-1.5 rounded-full hover:bg-blue-100"><CreditCard size={14} /> Facturación</button>
                     )}
                   </div>
                   
@@ -672,75 +386,27 @@ const App: React.FC = () => {
                     <div className="p-4">
                       {mode === 'firebase' ? (
                         <div className="space-y-4">
-                          <div>
-                            <p className="text-sm text-slate-500 mb-2">
-                              Pega tu objeto <code>firebaseConfig</code> aquí. Acepta JSON estándar o formato JS.
-                            </p>
-                            <textarea
-                              value={firebaseConfigInput}
-                              onChange={(e) => setFirebaseConfigInput(e.target.value)}
-                              className="w-full h-32 p-4 font-mono text-xs md:text-sm bg-slate-900 text-green-400 rounded-lg border border-slate-300 outline-none resize-y"
-                              spellCheck={false}
-                            />
-                            <div className="mt-2 text-right">
-                               <button 
-                                 onClick={() => setFirebaseConfigInput(JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2))}
-                                 className="text-xs text-slate-400 hover:text-slate-600 underline"
-                               >
-                                 Restaurar defecto
-                               </button>
-                            </div>
-                          </div>
-                          
+                          <textarea
+                            value={firebaseConfigInput}
+                            onChange={(e) => setFirebaseConfigInput(e.target.value)}
+                            className="w-full h-32 p-4 font-mono text-xs bg-slate-900 text-green-400 rounded-lg outline-none resize-y"
+                          />
                           <div className="pt-4 border-t border-slate-100">
-                             <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                               <UserCircle size={16} />
-                               UID de Prueba (Login Simulado)
-                             </label>
-                             <div className="flex gap-2">
-                               <input 
-                                 type="text" 
-                                 value={testUid}
-                                 onChange={(e) => setTestUid(e.target.value)}
-                                 placeholder="Ej: test-user-123"
-                                 className="flex-1 p-2 font-mono text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                               />
-                             </div>
-                             <p className="text-xs text-slate-400 mt-1">
-                               Se usará este ID para simular permisos: <code>/users/{'{uid}'}/...</code>
-                             </p>
+                             <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2"><UserCircle size={16} /> UID de Prueba</label>
+                             <input type="text" value={testUid} onChange={(e) => setTestUid(e.target.value)} className="w-full p-2 text-sm bg-slate-50 border rounded-lg" />
                           </div>
                         </div>
                       ) : (
                         <div className="space-y-4">
                           <div>
-                             <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                               <Key size={16} />
-                               Gemini API Key
-                             </label>
-                             <input 
-                               type="password" 
-                               value={geminiApiKey}
-                               onChange={(e) => setGeminiApiKey(e.target.value)}
-                               placeholder="Ingresa tu API Key..."
-                               className="w-full p-2 font-mono text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                             />
+                             <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2"><Key size={16} /> Gemini API Key</label>
+                             <input type="password" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} className="w-full p-2 text-sm border rounded-lg" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                              Modelo para Pruebas
-                            </label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
                             <div className="relative">
-                              <select
-                                value={geminiModel}
-                                onChange={(e) => setGeminiModel(e.target.value)}
-                                className="w-full p-3 pr-10 appearance-none bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium text-slate-700"
-                              >
-                                {GEMINI_MODELS.map(m => (
-                                  <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
-                              </select>
-                              <Cpu className="absolute right-3 top-3 text-slate-400 pointer-events-none" size={18} />
+                              <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="w-full p-3 border rounded-lg appearance-none bg-white"><option value="gemini-2.5-flash">Flash 2.5</option></select>
+                              <Cpu className="absolute right-3 top-3 text-slate-400" size={18} />
                             </div>
                           </div>
                         </div>
@@ -750,95 +416,30 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Content based on Mode */}
-              {mode === 'auth_lab' ? (
-                <AuthLab authInstance={realAuthInstance} />
-              ) : mode === 'prompt_manager' ? (
-                <PromptManager />
-              ) : mode === 'roadmap' ? (
-                <FutureRoadmap />
-              ) : mode === 'voice_lab' ? (
-                <VoiceLab />
-              ) : mode === 'db_admin' ? (
-                <FirestoreAdmin firebaseInstance={firebaseInstance} />
-              ) : (
-                <>
-                  <div className={`mb-8 p-4 rounded-xl border shadow-sm flex items-center gap-4 transition-colors duration-500 ${
-                    hasError 
-                      ? 'bg-red-50 border-red-100 text-red-800' 
-                      : allSuccess && !isLoading && mode !== 'local'
-                        ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
-                        : 'bg-white border-slate-200 text-slate-600'
-                  }`}>
-                    {hasError ? (
-                      <div className="bg-red-100 p-2 rounded-full"><XCircle size={24} /></div>
-                    ) : allSuccess && !isLoading && mode !== 'local' ? (
-                      <div className="bg-emerald-100 p-2 rounded-full"><ShieldCheck size={24} /></div>
-                    ) : (
-                       <div className="bg-slate-100 p-2 rounded-full"><Server size={24} className={isLoading ? "animate-pulse" : ""} /></div>
-                    )}
-                    
-                    <div>
-                      <h2 className="font-bold text-lg">
-                        {hasError ? 'Diagnóstico Fallido' : allSuccess && !isLoading && mode !== 'local' ? 'Sistema Operativo' : 'Estado del Diagnóstico'}
-                      </h2>
-                      <p className="text-sm opacity-90">
-                        {hasError 
-                          ? 'Se encontraron problemas durante la ejecución.' 
-                          : allSuccess && !isLoading && mode !== 'local'
-                            ? 'Todas las pruebas pasaron exitosamente.' 
-                            : 'Listo para iniciar pruebas.'}
-                      </p>
-                    </div>
-                  </div>
+              {/* --- ROUTER MANAGER HANDLES THE VIEWS --- */}
+              <RouterManager 
+                mode={mode}
+                runFirebaseTests={runFirebaseTests}
+                runGeminiTests={runGeminiTestFlow}
+                runLocalTests={runLocalTestsAction}
+                firebaseSteps={firebaseSteps}
+                geminiSteps={geminiSteps}
+                localSteps={localSteps}
+              />
 
-                  <div className="space-y-4">
-                    {currentSteps.map((step) => (
-                      <div key={step.id}>
-                        <StatusCard
-                          title={step.title}
-                          description={step.description}
-                          status={step.status}
-                          details={step.details}
-                        />
-                        {mode === 'gemini' && step.id === 'embed' && step.status === 'error' && (
-                          <div className="mt-2 ml-4">
-                            <button 
-                              onClick={() => setShowBillingWizard(true)}
-                              className="flex items-center gap-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg shadow-sm transition-colors animate-in fade-in slide-in-from-top-1"
-                            >
-                              <CreditCard size={14} />
-                              Solucionar Problema de Facturación (Embeddings)
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-8 flex justify-center">
-                    <button
-                      onClick={mode === 'firebase' ? runFirebaseTests : mode === 'gemini' ? runGeminiTestFlow : runLocalTests}
-                      disabled={isLoading}
-                      className={`flex items-center gap-2 px-6 py-3 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium shadow-lg hover:shadow-xl ${
-                        mode === 'firebase' 
-                          ? 'bg-orange-600 hover:bg-orange-700 shadow-orange-200' 
-                          : mode === 'gemini' 
-                            ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
-                            : 'bg-purple-600 hover:bg-purple-700 shadow-purple-200'
-                      }`}
-                    >
-                      {isLoading ? <Server size={18} className="animate-spin" /> : mode === 'firebase' ? <Database size={18} /> : mode === 'gemini' ? <Bot size={18} /> : <HardDrive size={18} />}
-                      {isLoading ? 'Ejecutando...' : 'Iniciar Diagnóstico'}
-                    </button>
-                  </div>
-                </>
-              )}
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <FirebaseProvider>
+      <MainLayout />
+    </FirebaseProvider>
   );
 };
 

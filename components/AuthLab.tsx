@@ -1,20 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
 import { Shield, Mail, Link as LinkIcon, AlertTriangle, CheckCircle2, UserCircle2, ArrowRight, RefreshCw, AlertCircle, HelpCircle, Settings, ExternalLink, LogOut, ArrowLeft, LogIn } from 'lucide-react';
 import { useAuthLogic } from '../hooks/useAuthLogic';
-
-interface AuthLabProps {
-  authInstance: any; // Real Firebase Auth Instance
-}
+import { useFirebase } from '../context/FirebaseContext';
 
 type AuthMode = 'link' | 'login' | 'reset';
 
-export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
-  // Seguridad: Validar que authInstance no sea null antes de acceder
-  const [user, setUser] = useState<any>(authInstance?.currentUser || null);
-  
-  // Logic Hook
-  const { status, message, errorDetail, clearState, login, logout, resetPassword, linkAccount } = useAuthLogic(authInstance);
+export const AuthLab: React.FC = () => {
+  const { auth, user } = useFirebase();
+  const { status, message, errorDetail, clearState, login, logout, resetPassword, linkAccount } = useAuthLogic();
 
   // Form Inputs
   const [email, setEmail] = useState('');
@@ -24,34 +17,27 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [showConflictModal, setShowConflictModal] = useState(false);
 
+  // Sync mode with user state changes
   useEffect(() => {
-    // CORRECCIÓN PRINCIPAL: Validar que authInstance y onAuthStateChanged existan
-    if (authInstance && typeof authInstance.onAuthStateChanged === 'function') {
-      const unsubscribe = authInstance.onAuthStateChanged((u: any) => {
-        setUser(u);
-        if (u) {
-          if (u.isAnonymous) {
-            setMode('link');
-          } else {
-            setMode('link'); 
-          }
-        } else {
-          setMode('login');
-        }
-        clearState();
-        setEmail('');
-        setPassword('');
-      });
-      return () => unsubscribe();
+    if (user) {
+      if (user.isAnonymous) {
+        setMode('link'); // Default action for anon is link
+      } else {
+        setMode('link'); // Logged in permanent user view handled by separate return
+      }
     } else {
-      console.warn("AuthLab: authInstance no soporta onAuthStateChanged o es nula.");
+      setMode('login'); // Default for no user
     }
-  }, [authInstance]);
+    clearState();
+    setEmail('');
+    setPassword('');
+  }, [user]); // Re-run when user changes
 
   const switchMode = (newMode: AuthMode) => {
     setMode(newMode);
     clearState();
-    setPassword('');
+    // Only clear inputs if switching to reset, keep them if switching between login/link for convenience
+    if (newMode === 'reset') setPassword('');
   };
 
   const onLogin = async () => {
@@ -66,14 +52,11 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
 
   const onLinkAccount = async () => {
     if (!user || !email || !password) return;
-    const success = await linkAccount(user, email, password, () => setShowConflictModal(true));
+    const success = await linkAccount(email, password, () => setShowConflictModal(true));
     if (success) setPassword('');
   };
 
-  // Validación robusta para mostrar estado inactivo
-  const isInstanceValid = authInstance && typeof authInstance.onAuthStateChanged === 'function';
-
-  if (!isInstanceValid) {
+  if (!auth) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-xl border border-slate-200 border-dashed animate-in fade-in">
         <div className="bg-slate-50 p-4 rounded-full mb-4">
@@ -83,9 +66,6 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
         <p className="text-slate-500 max-w-md mt-2 mb-6">
           Para usar este laboratorio, primero debes ejecutar el <strong>Diagnóstico de Firebase</strong> y obtener una conexión REAL exitosa.
         </p>
-        <div className="text-xs text-orange-600 bg-orange-50 p-2 rounded border border-orange-100">
-           Estado actual: {authInstance ? "Instancia Detectada (Posible Mock)" : "Sin Instancia (Null)"}
-        </div>
       </div>
     );
   }
@@ -131,14 +111,12 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
                   {user.email || 'Sin email (Cuenta Anónima)'}
                 </div>
               </div>
-              {!user.isAnonymous && (
-                 <button 
-                  onClick={logout}
-                  className="text-sm text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 flex items-center gap-2 transition-colors w-full md:w-auto justify-center md:justify-start"
-                 >
-                   <LogOut size={16} /> Cerrar Sesión
-                 </button>
-              )}
+              <button 
+                onClick={logout}
+                className="text-sm text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 flex items-center gap-2 transition-colors w-full md:w-auto justify-center md:justify-start"
+              >
+                <LogOut size={16} /> Cerrar Sesión
+              </button>
             </div>
           </div>
         ) : (
@@ -163,14 +141,6 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
           <p className="text-green-700 mt-2 max-w-lg mx-auto">
             Estás autenticado como <strong>{user.email}</strong>. Tu cuenta es permanente.
           </p>
-          <div className="mt-6 flex justify-center">
-             <button 
-               onClick={logout}
-               className="bg-white text-green-700 border border-green-200 px-4 py-2 rounded-lg font-medium shadow-sm hover:bg-green-50 transition-colors flex items-center gap-2"
-             >
-               <LogOut size={16} /> Salir
-             </button>
-          </div>
         </div>
       </div>
     );
@@ -182,7 +152,8 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
       {renderUserInfo()}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {/* TABS HEADER */}
+        
+        {/* TAB NAVIGATION FOR ANONYMOUS USER */}
         {user?.isAnonymous && (
            <div className="flex border-b border-slate-100">
              <button
@@ -191,7 +162,7 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
                  mode === 'link' ? 'text-orange-600 border-b-2 border-orange-500 bg-orange-50/50' : 'text-slate-500 hover:bg-slate-50'
                }`}
              >
-               <LinkIcon size={16} /> Vincular (Guardar Progreso)
+               <LinkIcon size={16} /> Vincular (Guardar Datos)
              </button>
              <button
                onClick={() => switchMode('login')}
@@ -199,7 +170,7 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
                  mode === 'login' || mode === 'reset' ? 'text-blue-600 border-b-2 border-blue-500 bg-blue-50/50' : 'text-slate-500 hover:bg-slate-50'
                }`}
              >
-               <LogIn size={16} /> Iniciar Sesión (Otra Cuenta)
+               <LogIn size={16} /> Cambiar Cuenta
              </button>
            </div>
         )}
@@ -217,7 +188,6 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
                <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
                  <HelpCircle className="text-blue-500" size={20} /> Recuperar Contraseña
                </h3>
-               <p className="text-sm text-slate-600 mb-6">Te enviaremos un enlace a tu correo para que puedas crear una nueva contraseña.</p>
                
                <div className="space-y-4">
                  <div className="space-y-1">
@@ -248,12 +218,13 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
               <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
                 <LogIn className="text-blue-500" size={20} /> Iniciar Sesión
               </h3>
-              <p className="text-sm text-slate-600 mb-6">
-                {user?.isAnonymous 
-                  ? "Accede a una cuenta existente. ⚠️ Advertencia: Se perderán los datos de la sesión anónima actual."
-                  : "Ingresa tus credenciales para acceder a tu cuenta."}
-              </p>
-
+              {user?.isAnonymous && (
+                 <div className="bg-red-50 text-red-700 p-3 rounded-lg text-xs mb-4 border border-red-100 flex gap-2 items-start">
+                   <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                   <p>Advertencia: Al iniciar sesión en otra cuenta, <strong>perderás el acceso a este usuario anónimo</strong> y sus datos temporales.</p>
+                 </div>
+              )}
+              
               <div className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-500 uppercase">Correo Electrónico</label>
@@ -308,7 +279,7 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
                 <LinkIcon className="text-orange-500" size={20} /> Convertir a Permanente
               </h3>
               <p className="text-sm text-slate-600 mb-6">
-                Crea una contraseña para tu ID actual. Esto guardará todo tu progreso y te permitirá volver a entrar después.
+                Crea una contraseña para tu ID actual (<strong>{user?.uid.substring(0,8)}...</strong>). Esto guardará tu progreso.
               </p>
               
               <div className="space-y-4">
@@ -400,7 +371,7 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
             
             <div className="p-6">
               <p className="text-sm text-slate-600 mb-4">
-                No se puede vincular porque ya existe una cuenta. ¿Deseas iniciar sesión en ella? (Perderás los datos actuales).
+                No se puede vincular porque ya existe una cuenta con este email. ¿Deseas iniciar sesión en ella? (Perderás los datos de este usuario anónimo).
               </p>
               <div className="flex gap-3">
                  <button 
@@ -429,7 +400,6 @@ export const AuthLab: React.FC<AuthLabProps> = ({ authInstance }) => {
   );
 };
 
-// Helper icon component
 const LockIcon = () => (
   <svg 
     xmlns="http://www.w3.org/2000/svg" 

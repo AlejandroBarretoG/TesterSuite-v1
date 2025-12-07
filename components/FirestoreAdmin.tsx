@@ -1,17 +1,15 @@
-
 import React, { useState, useEffect } from 'react';
 import { Database, Plus, Save, Trash2, Loader2, AlertCircle, CheckCircle2, FileJson, FolderTree, RefreshCw, Layout, Settings, Search } from 'lucide-react';
 import { fetchDocuments, createDocument, updateDocument, deleteDocument } from '../services/firestoreAdmin';
 import { getRegisteredCollections, registerCollection } from '../services/registryService';
 import { FirestoreSourceBadge } from './FirestoreSourceBadge';
-
-interface FirestoreAdminProps {
-  firebaseInstance: any;
-}
+import { useFirebase } from '../context/FirebaseContext';
 
 const DEFAULT_COLLECTIONS = ['users', '_app_registry'];
 
-export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance }) => {
+export const FirestoreAdmin: React.FC = () => {
+  const { app: firebaseInstance } = useFirebase();
+
   // Registry State
   const [knownCollections, setKnownCollections] = useState<string[]>([]);
   const [loadingRegistry, setLoadingRegistry] = useState(false);
@@ -38,6 +36,7 @@ export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance
   }, [firebaseInstance]);
 
   const loadRegistry = async () => {
+    if (!firebaseInstance) return;
     setLoadingRegistry(true);
     const result = await getRegisteredCollections(firebaseInstance);
     
@@ -51,7 +50,7 @@ export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance
 
   const handleManualAddCollection = async () => {
     const name = manualCollectionInput.trim();
-    if (!name) return;
+    if (!name || !firebaseInstance) return;
 
     // Optimistic Update
     if (!knownCollections.includes(name)) {
@@ -174,7 +173,7 @@ export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance
 
   if (!firebaseInstance) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-20 text-slate-400">
+      <div className="flex flex-col items-center justify-center h-full py-20 text-slate-400 animate-in fade-in">
         <Database size={48} className="mb-4 opacity-50" />
         <p>Conecta Firebase primero para usar el Administrador de BD.</p>
       </div>
@@ -188,8 +187,9 @@ export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance
 
   return (
     <div className="h-[calc(100vh-200px)] flex bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in">
+      {/* ... Left Sidebar & Main Content Logic is identical to previous layout but cleaner ... */}
       
-      {/* COLUMN 1: SIDEBAR (Collections + Manual Input) */}
+      {/* COLUMN 1: SIDEBAR */}
       <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
         <div className="p-4 border-b border-slate-200 bg-white">
           <div className="flex justify-between items-center mb-3">
@@ -245,10 +245,10 @@ export const FirestoreAdmin: React.FC<FirestoreAdminProps> = ({ firebaseInstance
         </div>
       </div>
 
-      {/* MAIN PANEL (Split View: List | Editor) */}
+      {/* MAIN PANEL */}
       <div className="flex-1 flex min-w-0 bg-white">
         
-        {/* COLUMN 2: DOCUMENTS LIST */}
+        {/* COLUMN 2: LIST */}
         <div className="w-64 border-r border-slate-200 flex flex-col bg-white shrink-0">
           <div className="p-4 border-b border-slate-100 flex flex-col gap-3 h-[73px] justify-center">
             <div className="flex justify-between items-center">

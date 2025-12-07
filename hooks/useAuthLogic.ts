@@ -1,18 +1,20 @@
-
 import { useState } from 'react';
 import { 
   signInWithEmailAndPassword, 
-  signOut, 
   sendPasswordResetEmail, 
   linkWithCredential, 
   EmailAuthProvider 
 } from '../services/firebase';
+import { useFirebase } from '../context/FirebaseContext';
+import { User } from '../types';
 
 /**
  * @ai-capability AUTH_HOOK
- * Reutiliza este hook para cualquier componente que necesite login/logout.
+ * Hook centralizado para lógica de autenticación.
+ * Ahora consume el contexto automáticamente, no requiere pasar la instancia.
  */
-export const useAuthLogic = (authInstance: any) => {
+export const useAuthLogic = () => {
+  const { auth, user, logout: contextLogout } = useFirebase();
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -24,13 +26,19 @@ export const useAuthLogic = (authInstance: any) => {
   };
 
   const login = async (email, password) => {
-    if (!authInstance) return;
+    if (!auth) {
+      setMessage("Firebase Auth no está inicializado.");
+      return;
+    }
+    
     setStatus('loading');
     setMessage('');
     setErrorDetail(null);
+    
     try {
-      await signInWithEmailAndPassword(authInstance, email, password);
+      await signInWithEmailAndPassword(auth, email, password);
       setStatus('success');
+      // No seteamos mensaje de éxito aquí porque usualmente redirige o cambia la UI
     } catch (error: any) {
       setStatus('error');
       
@@ -48,21 +56,12 @@ export const useAuthLogic = (authInstance: any) => {
     }
   };
 
-  const logout = async () => {
-     if (!authInstance) return;
-     try {
-       await signOut(authInstance);
-     } catch (e: any) {
-       alert("Error al cerrar sesión: " + e.message);
-     }
-  };
-
   const resetPassword = async (email) => {
-    if (!authInstance) return;
+    if (!auth) return;
     setStatus('loading');
     setMessage('');
     try {
-      await sendPasswordResetEmail(authInstance, email);
+      await sendPasswordResetEmail(auth, email);
       setStatus('success');
       setMessage(`Correo de recuperación enviado a ${email}. Revisa tu bandeja de entrada.`);
     } catch (error: any) {
@@ -71,15 +70,19 @@ export const useAuthLogic = (authInstance: any) => {
     }
   };
 
-  const linkAccount = async (user, email, password, onConflict?: () => void) => {
-     if (!authInstance || !user) return;
+  /**
+   * Vincula una cuenta anónima a credenciales permanentes.
+   */
+  const linkAccount = async (email, password, onConflict?: () => void) => {
+     if (!auth || !user) return;
      setStatus('loading');
      setMessage('');
      setErrorDetail(null);
 
      try {
        const credential = EmailAuthProvider.credential(email, password);
-       await linkWithCredential(user, credential);
+       // Casting necesario porque nuestras interfaces locales son simplificadas
+       await linkWithCredential(user as any, credential);
        setStatus('success');
        setMessage('¡Cuenta vinculada exitosamente! Tu usuario anónimo ahora es permanente.');
        return true; 
@@ -92,9 +95,6 @@ export const useAuthLogic = (authInstance: any) => {
       } else if (error.code === 'auth/operation-not-allowed') {
         setMessage('El proveedor Email/Password no está habilitado.');
         setErrorDetail('Ve a Firebase Console > Authentication > Sign-in method y habilita "Correo electrónico/contraseña".');
-      } else if (error.code === 'auth/network-request-failed') {
-        setMessage('Error de conexión con Firebase.');
-        setErrorDetail('Verifica tu conexión a internet o configuración de red. Si ocurre consistentemente, puede ser un bloqueo de CORS o Firewall.');
       } else if (error.code === 'auth/weak-password') {
         setMessage('La contraseña es demasiado débil. Usa al menos 6 caracteres.');
       } else {
@@ -110,7 +110,7 @@ export const useAuthLogic = (authInstance: any) => {
     errorDetail,
     clearState,
     login,
-    logout,
+    logout: contextLogout,
     resetPassword,
     linkAccount
   };
